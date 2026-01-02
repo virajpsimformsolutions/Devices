@@ -1,0 +1,8 @@
+{
+  "name": "device-farm-web",
+  "version": "1.0.0",
+  "description": "Supabase Device Farm Web Dashboard",
+  "scripts": {
+    "start": "npx serve ."
+  }
+}

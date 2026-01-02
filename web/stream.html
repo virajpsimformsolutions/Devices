@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Device Stream - Supabase Device Farm</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.48.0/dist/umd/supabase.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      color: #fff;
+    }
+    
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      background: rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .header h1 {
+      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .device-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+    
+    .status-badge.connecting {
+      background: rgba(255, 193, 7, 0.2);
+      color: #ffc107;
+    }
+    
+    .status-badge.connected {
+      background: rgba(40, 167, 69, 0.2);
+      color: #28a745;
+    }
+    
+    .status-badge.error {
+      background: rgba(220, 53, 69, 0.2);
+      color: #dc3545;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .controls {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .btn-primary {
+      background: #007bff;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #0056b3;
+    }
+    
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #c82333;
+    }
+    
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    
+    .main-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      gap: 16px;
+    }
+    
+    .device-frame {
+      position: relative;
+      background: #000;
+      border-radius: 24px;
+      padding: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+    
+    .device-screen {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #111;
+    }
+    
+    #stream-canvas {
+      display: block;
+      max-width: 100%;
+      max-height: calc(100vh - 200px);
+      cursor: pointer;
+    }
+    
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 360px;
+      height: 640px;
+      color: rgba(255, 255, 255, 0.5);
+      gap: 16px;
+    }
+    
+    .placeholder-icon {
+      font-size: 64px;
+    }
+    
+    .placeholder-text {
+      font-size: 1rem;
+      text-align: center;
+    }
+    
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .quick-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+    }
+    
+    .quick-action-btn {
+      width: 48px;
+      height: 48px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      font-size: 1.25rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .quick-action-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: scale(1.05);
+    }
+    
+    .quick-action-btn:active {
+      transform: scale(0.95);
+    }
+    
+    .touch-indicator {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border: 2px solid rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%) scale(0);
+      animation: touch-ripple 0.4s ease-out forwards;
+    }
+    
+    @keyframes touch-ripple {
+      0% {
+        transform: translate(-50%, -50%) scale(0);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 0;
+      }
+    }
+    
+    .swipe-path {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+    
+    .swipe-line {
+      position: absolute;
+      background: rgba(0, 123, 255, 0.6);
+      height: 4px;
+      border-radius: 2px;
+      pointer-events: none;
+      box-shadow: 0 0 8px rgba(0, 123, 255, 0.8);
+    }
+    
+    .error-message {
+      background: rgba(220, 53, 69, 0.2);
+      border: 1px solid rgba(220, 53, 69, 0.3);
+      border-radius: 8px;
+      padding: 16px 24px;
+      color: #dc3545;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .connection-info {
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.4);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📺 Device Stream</h1>
+    <div class="device-info">
+      <span id="device-model">Loading...</span>
+      <span id="device-resolution"></span>
+      <div id="status-badge" class="status-badge connecting">
+        <span class="status-dot"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn btn-secondary" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+      <button class="btn btn-danger" onclick="disconnect()">✕ Disconnect</button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="device-frame">
+      <div class="device-screen" id="device-screen">
+        <div class="placeholder" id="placeholder">
+          <div class="spinner"></div>
+          <div class="placeholder-text">Connecting to device...</div>
+        </div>
+        <canvas id="stream-canvas" style="display: none;"></canvas>
+      </div>
+    </div>
+
+    <div class="quick-actions">
+      <button class="quick-action-btn" onclick="wakeAndUnlock()" title="Wake & Unlock">🔓</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(3)" title="Home">🏠</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(4)" title="Back">◀</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(187)" title="Recent Apps">⧉</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(26)" title="Power">⏻</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(24)" title="Volume Up">🔊</button>
+      <button class="quick-action-btn" onclick="sendKeyEvent(25)" title="Volume Down">🔉</button>
+      <button class="quick-action-btn" onclick="openTextInput()" title="Type Text">⌨️</button>
+      <button class="quick-action-btn" onclick="rotateDevice()" title="Rotate">🔄</button>
+      <button class="quick-action-btn" onclick="takeScreenshot()" title="Screenshot">📸</button>
+    </div>
+
+    <!-- Text Input Modal -->
+    <div id="text-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+      <div style="background: #1a1a2e; padding: 24px; border-radius: 12px; max-width: 400px; width: 90%;">
+        <h3 style="margin-top: 0;">Type Text on Device</h3>
+        <textarea id="text-input" placeholder="Enter text to type on device..." style="width: 100%; height: 100px; padding: 12px; border-radius: 6px; border: 1px solid #555; background: #333; color: white; font-size: 14px; resize: vertical;"></textarea>
+        <div style="display: flex; gap: 8px; margin-top: 16px;">
+          <button class="btn btn-primary" onclick="sendText()" style="flex: 1;">Send</button>
+          <button class="btn btn-secondary" onclick="closeTextInput()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="connection-info" id="connection-info"></div>
+  </div>
+
+  <script>
+    // Get device ID from URL or sessionStorage
+    const params = new URLSearchParams(window.location.search);
+    let deviceId = params.get('device');
+    let deviceModel = params.get('model');
+    
+    // Fallback to sessionStorage if URL params are missing
+    if (!deviceId) {
+      deviceId = sessionStorage.getItem('deviceId');
+      deviceModel = sessionStorage.getItem('deviceModel');
+      console.log('📦 Retrieved from sessionStorage:', { deviceId, deviceModel });
+    }
+    
+    // Decode model if it came from URL
+    if (deviceModel && params.get('model')) {
+      deviceModel = decodeURIComponent(deviceModel);
+    }
+    
+    // Default if still missing
+    if (!deviceModel) {
+      deviceModel = 'Unknown Device';
+    }
+    
+    // Supabase config (for releasing device on disconnect)
+    const SUPABASE_URL = 'https://lqseziytaqypbeuopzel.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_SaN7ZDNyxy0PDh3IUuZbSg_lubn9-mb';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    // WebSocket configuration
+    // Priority: 1) URL param "ws" 2) localStorage "streamServerUrl" 3) Auto-detect
+    function getStreamServerUrl() {
+      // Check URL param first (e.g., ?ws=wss://your-url.ngrok-free.dev)
+      const wsParam = params.get('ws');
+      if (wsParam) {
+        localStorage.setItem('streamServerUrl', wsParam);
+        return wsParam;
+      }
+      
+      // Check localStorage
+      const savedUrl = localStorage.getItem('streamServerUrl');
+      if (savedUrl) return savedUrl;
+      
+      // Auto-detect based on hostname
+      const hostname = window.location.hostname;
+      
+      // If deployed on Vercel, use ngrok WSS
+      if (hostname.includes('vercel.app')) {
+        return 'wss://extractable-lorri-racially.ngrok-free.dev';
+      }
+      
+      // If running locally, use localhost WebSocket
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'ws://localhost:8080';
+      }
+      
+      // For local network access (e.g., 192.168.x.x)
+      if (hostname.startsWith('192.168.')) {
+        return `ws://${hostname}:8080`;
+      }
+      
+      // Default to ngrok WSS for any HTTPS deployment
+      return 'wss://extractable-lorri-racially.ngrok-free.dev';
+    }
+    
+    const STREAM_WS_URL = getStreamServerUrl();
+    
+    // Connection state
+    let ws = null;
+    let canvas = null;
+    let ctx = null;
+    let deviceWidth = 1080;
+    let deviceHeight = 1920;
+    let isConnected = false;
+    
+    // Initialize
+    document.getElementById('device-model').textContent = deviceModel;
+    document.getElementById('connection-info').textContent = `Device: ${deviceId}`;
+    
+    if (!deviceId) {
+      showError('No device ID provided. Please go back to the dashboard.');
+    } else {
+      initCanvas();
+      connect();
+    }
+    
+    // Gesture state
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let isDragging = false;
+    let longPressTimer = null;
+    let swipePath = null; // SVG element for showing drag path
+    let pathPoints = []; // Track all points in the drag path
+    let lastSwipePoint = null; // Last point sent to device for real-time swipe
+    
+    function initCanvas() {
+      canvas = document.getElementById('stream-canvas');
+      ctx = canvas.getContext('2d');
+      
+      // Mouse events for desktop
+      canvas.addEventListener('mousedown', handleMouseDown);
+      canvas.addEventListener('mousemove', handleMouseMove);
+      canvas.addEventListener('mouseup', handleMouseUp);
+      canvas.addEventListener('mouseleave', handleMouseUp);
+      
+      // Touch events for mobile
+      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    }
+    
+    function connect() {
+      // Check if we have a valid WebSocket URL
+      if (!STREAM_WS_URL) {
+        showConfigPrompt();
+        return;
+      }
+      
+      updateStatus('connecting', 'Connecting...');
+      
+      const wsUrl = `${STREAM_WS_URL}?device=${encodeURIComponent(deviceId)}`;
+      console.log('🔌 Connecting to:', wsUrl);
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+        updateStatus('connected', 'Connected');
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          handleMessage(message);
+        } catch (err) {
+          console.error('Failed to parse message:', err);
+        }
+      };
+      
+      ws.onerror = (err) => {
+        console.error('❌ WebSocket error:', err);
+        updateStatus('error', 'Connection Error');
+      };
+      
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket closed:', event.code, event.reason);
+        isConnected = false;
+        
+        if (event.code !== 1000) {
+          updateStatus('error', 'Disconnected');
+          showError('Connection lost. The streaming server may not be running.');
+        }
+      };
+    }
+    
+    function handleMessage(message) {
+      switch (message.type) {
+        case 'info':
+          // Device info received
+          deviceWidth = message.width;
+          deviceHeight = message.height;
+          document.getElementById('device-resolution').textContent = `${deviceWidth}×${deviceHeight}`;
+          
+          // Set canvas size (scale to fit)
+          const maxHeight = window.innerHeight - 200;
+          const scale = Math.min(1, maxHeight / deviceHeight, 360 / deviceWidth);
+          canvas.width = Math.floor(deviceWidth * scale);
+          canvas.height = Math.floor(deviceHeight * scale);
+          
+          // Show canvas
+          document.getElementById('placeholder').style.display = 'none';
+          canvas.style.display = 'block';
+          isConnected = true;
+          break;
+          
+        case 'frame':
+          // Render video frame
+          if (message.data) {
+            renderFrame(message.format || 'png', message.data);
+          }
+          break;
+          
+        case 'error':
+          showError(message.message);
+          updateStatus('error', 'Error');
+          break;
+      }
+    }
+    
+    function renderFrame(format, base64Data) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      const mimeType = format === 'png' ? 'image/png' : 'image/jpeg';
+      img.src = `data:${mimeType};base64,${base64Data}`;
+    }
+    
+    // Mouse gesture handlers
+    function handleMouseDown(event) {
+      if (!isConnected) return;
+      const rect = canvas.getBoundingClientRect();
+      touchStartX = event.clientX - rect.left;
+      touchStartY = event.clientY - rect.top;
+      touchStartTime = Date.now();
+      isDragging = false;
+      
+      // Start long press timer
+      longPressTimer = setTimeout(() => {
+        if (!isDragging) {
+          const x = (touchStartX / rect.width) * deviceWidth;
+          const y = (touchStartY / rect.height) * deviceHeight;
+          sendLongPress(x, y);
+          showTouchIndicator(touchStartX, touchStartY, 'long');
+        }
+      }, 500);
+    }
+    
+    function handleMouseMove(event) {
+      if (!isConnected || !touchStartTime) return;
+      const rect = canvas.getBoundingClientRect();
+      const currentX = event.clientX - rect.left;
+      const currentY = event.clientY - rect.top;
+      const distance = Math.sqrt(Math.pow(currentX - touchStartX, 2) + Math.pow(currentY - touchStartY, 2));
+      
+      if (distance > 10) {
+        if (!isDragging) {
+          isDragging = true;
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+          // Initialize swipe path
+          pathPoints = [{x: touchStartX, y: touchStartY}];
+          lastSwipePoint = {x: touchStartX, y: touchStartY};
+          createSwipePath();
+        }
+        
+        // Add current point to path
+        pathPoints.push({x: currentX, y: currentY});
+        updateSwipePath();
+        
+        // Throttle: only send swipe when moved 40+ pixels from last sent position (reduced lag)
+        if (lastSwipePoint) {
+          const distanceFromLast = Math.sqrt(
+            Math.pow(currentX - lastSwipePoint.x, 2) + 
+            Math.pow(currentY - lastSwipePoint.y, 2)
+          );
+          
+          if (distanceFromLast >= 25) {
+            // Convert to device coordinates and clamp to valid range
+            const x1 = Math.max(0, Math.min(deviceWidth, (lastSwipePoint.x / rect.width) * deviceWidth));
+            const y1 = Math.max(0, Math.min(deviceHeight, (lastSwipePoint.y / rect.height) * deviceHeight));
+            const x2 = Math.max(0, Math.min(deviceWidth, (currentX / rect.width) * deviceWidth));
+            const y2 = Math.max(0, Math.min(deviceHeight, (currentY / rect.height) * deviceHeight));
+            
+            // Faster swipe duration for immediate response
+            sendSwipe(x1, y1, x2, y2, 50);
+            lastSwipePoint = {x: currentX, y: currentY};
+          }
+        }
+      }
+    }
+    
+    function handleMouseUp(event) {
+      if (!isConnected || !touchStartTime) return;
+      
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      
+      const rect = canvas.getBoundingClientRect();
+      const duration = Date.now() - touchStartTime;
+      
+      if (isDragging) {
+        // Already sent progressive swipes during drag, no need for final swipe
+        showTouchIndicator(touchStartX, touchStartY, 'swipe');
+      } else if (duration < 500) {
+        // Send tap only if didn't drag
+        const x = (touchStartX / rect.width) * deviceWidth;
+        const y = (touchStartY / rect.height) * deviceHeight;
+        sendTap(x, y);
+        showTouchIndicator(touchStartX, touchStartY, 'tap');
+      }
+      
+      clearSwipePath();
+      touchStartTime = 0;
+      isDragging = false;
+    }
+    
+    // Touch gesture handlers
+    function handleTouchStart(event) {
+      if (!isConnected) return;
+      event.preventDefault();
+      
+      const touch = event.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      touchStartX = touch.clientX - rect.left;
+      touchStartY = touch.clientY - rect.top;
+      touchStartTime = Date.now();
+      isDragging = false;
+      
+      // Start long press timer
+      longPressTimer = setTimeout(() => {
+        if (!isDragging) {
+          const x = (touchStartX / rect.width) * deviceWidth;
+          const y = (touchStartY / rect.height) * deviceHeight;
+          sendLongPress(x, y);
+          showTouchIndicator(touchStartX, touchStartY, 'long');
+        }
+      }, 500);
+    }
+    
+    function handleTouchMove(event) {
+      if (!isConnected || !touchStartTime) return;
+      event.preventDefault();
+      
+      const touch = event.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const currentX = touch.clientX - rect.left;
+      const currentY = touch.clientY - rect.top;
+      const distance = Math.sqrt(Math.pow(currentX - touchStartX, 2) + Math.pow(currentY - touchStartY, 2));
+      
+      if (distance > 10) {
+        if (!isDragging) {
+          isDragging = true;
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+          // Initialize swipe path
+          pathPoints = [{x: touchStartX, y: touchStartY}];
+          lastSwipePoint = {x: touchStartX, y: touchStartY};
+          createSwipePath();
+        }
+        
+        // Add current point to path
+        pathPoints.push({x: currentX, y: currentY});
+        updateSwipePath();
+        
+        // Throttle: only send swipe when moved 40+ pixels from last sent position (reduced lag)
+        if (lastSwipePoint) {
+          const distanceFromLast = Math.sqrt(
+            Math.pow(currentX - lastSwipePoint.x, 2) + 
+            Math.pow(currentY - lastSwipePoint.y, 2)
+          );
+          
+          if (distanceFromLast >= 25) {
+            // Convert to device coordinates and clamp to valid range
+            const x1 = Math.max(0, Math.min(deviceWidth, (lastSwipePoint.x / rect.width) * deviceWidth));
+            const y1 = Math.max(0, Math.min(deviceHeight, (lastSwipePoint.y / rect.height) * deviceHeight));
+            const x2 = Math.max(0, Math.min(deviceWidth, (currentX / rect.width) * deviceWidth));
+            const y2 = Math.max(0, Math.min(deviceHeight, (currentY / rect.height) * deviceHeight));
+            
+            // Faster swipe duration for immediate response
+            sendSwipe(x1, y1, x2, y2, 50);
+            lastSwipePoint = {x: currentX, y: currentY};
+          }
+        }
+      }
+    }
+    
+    function handleTouchEnd(event) {
+      if (!isConnected || !touchStartTime) return;
+      event.preventDefault();
+      
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      
+      const rect = canvas.getBoundingClientRect();
+      const duration = Date.now() - touchStartTime;
+      
+      if (isDragging) {
+        // Already sent progressive swipes during drag, no need for final swipe
+        showTouchIndicator(touchStartX, touchStartY, 'swipe');
+      } else if (duration < 500) {
+        // Send tap only if didn't drag
+        const x = (touchStartX / rect.width) * deviceWidth;
+        const y = (touchStartY / rect.height) * deviceHeight;
+        sendTap(x, y);
+        showTouchIndicator(touchStartX, touchStartY, 'tap');
+      }
+      
+      clearSwipePath();
+      touchStartTime = 0;
+      isDragging = false;
+    }
+    
+    function showTouchIndicator(x, y, type = 'tap') {
+      const indicator = document.createElement('div');
+      indicator.className = 'touch-indicator';
+      indicator.style.left = x + 'px';
+      indicator.style.top = y + 'px';
+      if (type === 'long') {
+        indicator.style.borderColor = '#ffc107';
+        indicator.style.borderWidth = '3px';
+      }
+      document.getElementById('device-screen').appendChild(indicator);
+      
+      setTimeout(() => indicator.remove(), 400);
+    }
+    
+    function createSwipePath() {
+      // Create SVG element for drawing the swipe path
+      const deviceScreen = document.getElementById('device-screen');
+      swipePath = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      swipePath.setAttribute('class', 'swipe-path');
+      swipePath.setAttribute('width', '100%');
+      swipePath.setAttribute('height', '100%');
+      swipePath.style.position = 'absolute';
+      swipePath.style.top = '0';
+      swipePath.style.left = '0';
+      swipePath.style.pointerEvents = 'none';
+      deviceScreen.appendChild(swipePath);
+    }
+    
+    function updateSwipePath() {
+      if (!swipePath || pathPoints.length < 2) return;
+      
+      // Clear previous path
+      while (swipePath.firstChild) {
+        swipePath.removeChild(swipePath.firstChild);
+      }
+      
+      // Draw lines between all points
+      for (let i = 0; i < pathPoints.length - 1; i++) {
+        const p1 = pathPoints[i];
+        const p2 = pathPoints[i + 1];
+        
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', p1.x);
+        line.setAttribute('y1', p1.y);
+        line.setAttribute('x2', p2.x);
+        line.setAttribute('y2', p2.y);
+        line.setAttribute('stroke', 'rgba(0, 123, 255, 0.8)');
+        line.setAttribute('stroke-width', '4');
+        line.setAttribute('stroke-linecap', 'round');
+        line.setAttribute('stroke-linejoin', 'round');
+        swipePath.appendChild(line);
+      }
+      
+      // Draw circles at each point for dots along the path
+      pathPoints.forEach((p, i) => {
+        if (i % 3 === 0) { // Don't draw every point to avoid clutter
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', p.x);
+          circle.setAttribute('cy', p.y);
+          circle.setAttribute('r', '3');
+          circle.setAttribute('fill', 'rgba(0, 123, 255, 0.9)');
+          swipePath.appendChild(circle);
+        }
+      });
+    }
+    
+    function clearSwipePath() {
+      if (swipePath) {
+        swipePath.remove();
+        swipePath = null;
+      }
+      pathPoints = [];
+      lastSwipePoint = null;
+    }
+    
+    function sendTap(x, y) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'tap',
+        x: x,
+        y: y
+      }));
+      
+      console.log(`👆 Tap: (${Math.round(x)}, ${Math.round(y)})`);
+    }
+    
+    function sendKeyEvent(keycode) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.warn('Not connected, cannot send key event');
+        return;
+      }
+      
+      ws.send(JSON.stringify({
+        type: 'keyevent',
+        keycode: keycode
+      }));
+      
+      console.log(`🔘 Key event: ${keycode}`);
+    }
+    
+    function sendSwipe(x1, y1, x2, y2, duration) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'swipe',
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        duration: duration
+      }));
+      
+      const direction = y2 < y1 ? '↑' : y2 > y1 ? '↓' : x2 > x1 ? '→' : '←';
+      const distance = Math.round(Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2)));
+      console.log(`👉 Swipe ${direction}: (${Math.round(x1)}, ${Math.round(y1)}) → (${Math.round(x2)}, ${Math.round(y2)}) [${distance}px]`);
+    }
+    
+    function sendLongPress(x, y) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      // Send as swipe with 0 distance and long duration
+      ws.send(JSON.stringify({
+        type: 'swipe',
+        x1: x,
+        y1: y,
+        x2: x,
+        y2: y,
+        duration: 1000
+      }));
+      
+      console.log(`🖱️ Long press: (${Math.round(x)}, ${Math.round(y)})`);
+    }
+    
+    // Text input functions
+    function openTextInput() {
+      document.getElementById('text-modal').style.display = 'flex';
+      document.getElementById('text-input').focus();
+    }
+    
+    function closeTextInput() {
+      document.getElementById('text-modal').style.display = 'none';
+      document.getElementById('text-input').value = '';
+    }
+    
+    function sendText() {
+      const text = document.getElementById('text-input').value;
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'text',
+        text: text
+      }));
+      
+      console.log(`⌨️ Text sent: ${text}`);
+      closeTextInput();
+    }
+    
+    // Wake and unlock device
+    function wakeAndUnlock() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      // First wake the screen (Power button)
+      ws.send(JSON.stringify({
+        type: 'keyevent',
+        keycode: 26 // KEYCODE_POWER
+      }));
+      
+      // Wait a bit then swipe up to unlock
+      setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          // Swipe up from bottom to unlock
+          ws.send(JSON.stringify({
+            type: 'swipe',
+            x1: deviceWidth / 2,
+            y1: deviceHeight * 0.8,
+            x2: deviceWidth / 2,
+            y2: deviceHeight * 0.2,
+            duration: 300
+          }));
+        }
+      }, 500);
+      
+      console.log('🔓 Wake & unlock triggered');
+    }
+    
+    // Device rotation
+    function rotateDevice() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      // Toggle rotation via keyevent (Ctrl+F11 equivalent)
+      // Or use adb shell content insert --uri content://settings/system --bind name:s:accelerometer_rotation --bind value:i:0
+      // For now, use keyevent for screen rotation
+      ws.send(JSON.stringify({
+        type: 'keyevent',
+        keycode: 82 // KEYCODE_MENU to trigger rotation in some devices
+      }));
+      
+      console.log(`🔄 Rotation triggered`);
+      
+      // Alternative: send custom rotation command
+      ws.send(JSON.stringify({
+        type: 'rotate'
+      }));
+    }
+    
+    // Screenshot
+    function takeScreenshot() {
+      if (!canvas) return;
+      
+      // Convert canvas to blob and download
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `device-screenshot-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log('📸 Screenshot downloaded');
+      });
+    }
+    
+    function updateStatus(status, text) {
+      const badge = document.getElementById('status-badge');
+      const statusText = document.getElementById('status-text');
+      
+      badge.className = 'status-badge ' + status;
+      statusText.textContent = text;
+    }
+    
+    function showError(message) {
+      const placeholder = document.getElementById('placeholder');
+      placeholder.innerHTML = `
+        <div class="placeholder-icon">⚠️</div>
+        <div class="error-message">${message}</div>
+        <button class="btn btn-primary" onclick="window.location.href='index.html'">Back to Dashboard</button>
+      `;
+      placeholder.style.display = 'flex';
+      if (canvas) {
+        canvas.style.display = 'none';
+      }
+    }
+    
+    function showConfigPrompt() {
+      updateStatus('error', 'Configuration Required');
+      const placeholder = document.getElementById('placeholder');
+      placeholder.innerHTML = `
+        <div class="placeholder-icon">⚙️</div>
+        <div style="color: #ffc107; margin-bottom: 16px;">
+          <strong>Stream Server Configuration</strong>
+        </div>
+        <div class="error-message" style="margin-bottom: 16px;">
+          This page is served over HTTPS but needs to connect to your local stream server.
+          <br><br>
+          Enter your local machine's IP address where the backend is running:
+        </div>
+        <div style="margin-bottom: 16px;">
+          <input type="text" id="ws-url-input" placeholder="e.g., 192.168.1.100" 
+                 style="padding: 10px; font-size: 16px; width: 200px; border-radius: 6px; border: 1px solid #555; background: #333; color: white;">
+        </div>
+        <button class="btn btn-primary" onclick="saveAndConnect()">Connect</button>
+        <div style="margin-top: 16px; font-size: 12px; color: rgba(255,255,255,0.5);">
+          Or access this page locally: <code>npx serve web</code>
+        </div>
+      `;
+      placeholder.style.display = 'flex';
+    }
+    
+    function saveAndConnect() {
+      const input = document.getElementById('ws-url-input');
+      const ip = input.value.trim();
+      if (!ip) {
+        alert('Please enter an IP address');
+        return;
+      }
+      const wsUrl = `ws://${ip}:8080`;
+      localStorage.setItem('streamServerUrl', wsUrl);
+      window.location.reload();
+    }
+    
+    function toggleFullscreen() {
+      const screen = document.getElementById('device-screen');
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        screen.requestFullscreen();
+      }
+    }
+    
+    async function disconnect() {
+      console.log('🔌 Disconnecting...');
+      
+      // Close WebSocket
+      if (ws) {
+        ws.close(1000, 'User disconnected');
+      }
+      
+      // Release device in Supabase
+      try {
+        await supabase
+          .from('devices')
+          .update({ status: 'free', session_id: null })
+          .eq('id', deviceId);
+        
+        console.log('✅ Device released');
+      } catch (err) {
+        console.error('Failed to release device:', err);
+      }
+      
+      // Go back to dashboard
+      window.location.href = 'index.html';
+    }
+    
+    // Handle page unload
+    window.addEventListener('beforeunload', () => {
+      if (ws) {
+        ws.close(1000, 'Page closed');
+      }
+    });
+  </script>
+</body>
+</html>

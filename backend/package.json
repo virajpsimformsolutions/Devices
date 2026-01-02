@@ -1,0 +1,15 @@
+{
+  "name": "supabase-device-farm-backend",
+  "version": "1.0.0",
+  "main": "device-host.js",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node device-host.js"
+  },
+  "dependencies": {
+    "@devicefarmer/adbkit": "^3.3.8",
+    "@supabase/supabase-js": "^2.48.0",
+    "ws": "^8.18.0"
+  }
+}

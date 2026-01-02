@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>🚀 Supabase Device Farm (No Auth)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.48.0/dist/umd/supabase.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 20px; }
+    .device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+    .device-card { padding: 16px; border-radius: 8px; border: 1px solid #ddd; background: #f8f9fa; }
+    .device-card.free { border-color: #28a745; background: #d4edda; }
+    .device-card.busy { border-color: #dc3545; background: #f8d7da; }
+    button { margin-right: 8px; margin-top: 4px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <h1>🚀 Supabase Device Farm</h1>
+  <p><strong>No login required!</strong> Just connect to devices.</p>
+
+  <h2>Devices Online: <span id="count">0</span></h2>
+  <div style="margin-bottom: 20px; padding: 12px; background: #f0f0f0; border-radius: 8px;">
+    <h3>📦 APK Management</h3>
+    <div style="margin-bottom: 10px;">
+      <label>Upload new APK:</label>
+      <input type="file" id="apk-file" accept=".apk,.ipa" />
+    </div>
+    <div style="margin-bottom: 10px;">
+      <label>Or select existing build:</label>
+      <select id="existing-builds" style="padding: 8px; width: 100%; max-width: 400px;">
+        <option value="">-- Choose existing build --</option>
+      </select>
+      <button onclick="loadExistingBuilds()" style="margin-left: 8px; padding: 8px 12px;">🔄 Refresh</button>
+    </div>
+    <button onclick="uploadAndInstallAll()" style="background: #28a745; color: white; padding: 10px 16px; margin-right: 8px;">📦 Upload & Install on All Free Devices</button>
+    <button onclick="installExistingOnAll()" style="background: #17a2b8; color: white; padding: 10px 16px;">⚡ Install Existing on All Free Devices</button>
+  </div>
+  <div id="devices" class="device-grid"></div>
+
+  <script>
+    const SUPABASE_URL = 'https://lqseziytaqypbeuopzel.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_SaN7ZDNyxy0PDh3IUuZbSg_lubn9-mb';
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function loadDevices() {
+      console.log('🔄 Loading devices...');
+      
+      const { data, error } = await supabase
+        .from('devices')
+        .select('*')
+        .neq('status', 'offline')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('❌ Failed to load devices:', error);
+        return;
+      }
+
+      const devices = data || [];
+      console.log('✅ Loaded', devices.length, 'devices');
+      document.getElementById('count').textContent = devices.length;
+      const container = document.getElementById('devices');
+
+      container.innerHTML = devices.map(d => `
+        <div class="device-card ${d.status}">
+          <h3>${d.model}</h3>
+          <p>${d.type} • ${d.os_version}</p>
+          <p>Status: <strong>${d.status.toUpperCase()}</strong></p>
+          ${d.status === 'free' ? `
+            <button onclick="reserveAndStream('${d.id}', '${encodeURIComponent(d.model)}')" style="background: #28a745; color: white;">📺 Connect & Stream</button>
+            <button onclick="installApk('${d.id}')" style="background: #007bff; color: white;">📦 Install APK</button>
+          ` : `
+            <span style="color: #dc3545;">In use</span>
+            <button onclick="viewStream('${d.id}', '${encodeURIComponent(d.model)}')" style="background: #6c757d; color: white;">👁️ View Stream</button>
+          `}
+        </div>
+      `).join('');
+    }
+
+    async function reserveAndStream(deviceId, encodedModel) {
+      console.log('🔒 Reserving device:', deviceId);
+      
+      const { data, error } = await supabase
+        .from('devices')
+        .update({
+          status: 'busy',
+          session_id: Date.now().toString()
+        })
+        .eq('id', deviceId)
+        .eq('status', 'free')
+        .select();
+
+      if (error) {
+        console.error('❌ Reserve failed:', error);
+        alert('Could not reserve device (maybe already busy)');
+        return;
+      }
+
+      console.log('✅ Device reserved:', data);
+      
+      // Store device info in sessionStorage as backup
+      sessionStorage.setItem('deviceId', deviceId);
+      sessionStorage.setItem('deviceModel', decodeURIComponent(encodedModel));
+      
+      // Open stream page in same window
+      const streamUrl = 'stream.html?device=' + encodeURIComponent(deviceId) + '&model=' + encodedModel;
+      console.log('🔗 Navigating to:', streamUrl);
+      window.location.href = streamUrl;
+    }
+
+    function viewStream(deviceId, encodedModel) {
+      // View an existing stream (for busy devices)
+      // Store device info in sessionStorage as backup
+      sessionStorage.setItem('deviceId', deviceId);
+      sessionStorage.setItem('deviceModel', decodeURIComponent(encodedModel));
+      
+      const streamUrl = 'stream.html?device=' + encodeURIComponent(deviceId) + '&model=' + encodedModel;
+      console.log('🔗 Navigating to:', streamUrl);
+      window.location.href = streamUrl;
+    }
+
+    async function loadExistingBuilds() {
+      console.log('📂 Loading existing builds...');
+      
+      try {
+        const allFiles = [];
+        
+        // List root to get device directories
+        const { data: rootItems, error: rootError } = await supabase.storage
+          .from('apps')
+          .list('', { limit: 1000 });
+
+        if (rootError) {
+          console.error('❌ Failed to load builds:', rootError);
+          return;
+        }
+
+        // For each device directory, list files
+        for (const item of rootItems) {
+          if (item.id && !item.name) {
+            // This is a directory, list files in it
+            const { data: deviceFiles, error: devError } = await supabase.storage
+              .from('apps')
+              .list(item.name, { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
+
+            if (!devError && deviceFiles) {
+              deviceFiles.forEach(file => {
+                if (file.name && !file.name.endsWith('/')) {
+                  allFiles.push({
+                    path: `${item.name}/${file.name}`,
+                    name: file.name,
+                    size: file.metadata?.size || 0,
+                    deviceId: item.name
+                  });
+                }
+              });
+            }
+          }
+        }
+
+        // Sort by date (newest first)
+        allFiles.sort((a, b) => b.path.localeCompare(a.path));
+
+        console.log('✅ Loaded', allFiles.length, 'files');
+        
+        const select = document.getElementById('existing-builds');
+        select.innerHTML = '<option value="">-- Choose existing build --</option>';
+        
+        allFiles.forEach(file => {
+          const option = document.createElement('option');
+          const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+          option.value = file.path; // Store full path
+          option.textContent = `${file.name} (${sizeMB}MB) - ${file.deviceId}`;
+          select.appendChild(option);
+        });
+      } catch (err) {
+        console.error('❌ Error loading builds:', err);
+      }
+    }
+
+    async function installExistingOnAll() {
+      const select = document.getElementById('existing-builds');
+      const selectedFile = select.value;
+
+      if (!selectedFile) {
+        alert('Please select a build to install');
+        return;
+      }
+
+      console.log('⚡ Installing existing build on all devices:', selectedFile);
+
+      const { data: freeDevices, error: deviceError } = await supabase
+        .from('devices')
+        .select('id')
+        .eq('status', 'free');
+
+      if (deviceError) {
+        console.error('❌ Failed to get devices:', deviceError);
+        alert('Failed to get devices');
+        return;
+      }
+
+      console.log('📱 Free devices:', freeDevices.length);
+      let successCount = 0;
+
+      for (const device of freeDevices) {
+        try {
+          const { error: queueError } = await supabase
+            .from('install_queue')
+            .insert({ device_id: device.id, app_path: selectedFile });
+
+          if (queueError) {
+            throw queueError;
+          }
+
+          console.log(`✅ Queued ${selectedFile} for ${device.id}`);
+          successCount++;
+        } catch (err) {
+          console.error(`❌ Queue insert failed for ${device.id}:`, err);
+        }
+      }
+
+      alert(`✅ Build queued for ${successCount}/${freeDevices.length} devices!`);
+    }
+
+    async function uploadFileInChunks(bucket, filePath, file) {
+      const chunks = Math.ceil(file.size / CHUNK_SIZE);
+      console.log(`📦 File size: ${(file.size / 1024 / 1024).toFixed(2)}MB, uploading in ${chunks} chunks...`);
+      
+      for (let i = 0; i < chunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+        
+        console.log(`📤 Chunk ${i + 1}/${chunks} (${(chunk.size / 1024 / 1024).toFixed(2)}MB)...`);
+        
+        const { error } = await supabase.storage
+          .from(bucket)
+          .upload(filePath, chunk, {
+            upsert: i === 0,
+            duplex: 'half'
+          });
+        
+        if (error) {
+          throw new Error(`Chunk ${i + 1} upload failed: ${error.message}`);
+        }
+      }
+      
+      console.log('✅ All chunks uploaded successfully');
+    }
+
+    async function installApk(deviceId) {
+      console.log('📱 Install APK clicked for device:', deviceId);
+      
+      const fileInput = document.getElementById('apk-file');
+      if (!fileInput.files.length) {
+        console.error('❌ No file selected');
+        return alert('Choose an APK file first');
+      }
+      
+      const file = fileInput.files[0];
+      const fileName = `${deviceId}/${Date.now()}-${file.name}`;
+      
+      console.log('📦 Uploading file:', file.name, 'Size:', (file.size / 1024 / 1024).toFixed(2) + 'MB');
+      console.log('📁 Storage path:', fileName);
+
+      try {
+        if (file.size > 100 * 1024 * 1024) {
+          await uploadFileInChunks('apps', fileName, file);
+        } else {
+          const { error: uploadError } = await supabase
+            .storage
+            .from('apps')
+            .upload(fileName, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw uploadError;
+          }
+          console.log('✅ Upload successful');
+        }
+      } catch (err) {
+        console.error('❌ Upload failed:', err);
+        alert('Upload failed: ' + err.message);
+        return;
+      }
+      
+      console.log('📝 Inserting into install_queue...');
+
+      const { data: queueData, error: queueError } = await supabase
+        .from('install_queue')
+        .insert({ device_id: deviceId, app_path: fileName })
+        .select();
+
+      if (queueError) {
+        console.error('❌ Queue insert failed:', queueError);
+        alert('Queue insert failed: ' + queueError.message);
+        return;
+      }
+      
+      console.log('✅ Queue insert successful:', queueData);
+      alert(`APK queued for ${deviceId}!`);
+    }
+
+    async function uploadAndInstallAll() {
+      console.log('📦 Install on all devices clicked');
+      
+      const fileInput = document.getElementById('apk-file');
+      if (!fileInput.files.length) {
+        console.error('❌ No file selected');
+        return alert('Choose APK first');
+      }
+
+      const file = fileInput.files[0];
+      const timestamp = Date.now();
+      
+      console.log('📁 File:', file.name, 'Size:', (file.size / 1024 / 1024).toFixed(2) + 'MB');
+
+      const { data: freeDevices, error: deviceError } = await supabase
+        .from('devices')
+        .select('id')
+        .eq('status', 'free');
+
+      if (deviceError) {
+        console.error('❌ Failed to get devices:', deviceError);
+        return alert('Failed to get devices: ' + deviceError.message);
+      }
+      
+      console.log('📱 Free devices:', freeDevices.length);
+
+      let successCount = 0;
+      for (const device of freeDevices) {
+        const fileName = `${device.id}/${timestamp}-${file.name}`;
+        console.log(`📤 Uploading to ${fileName}...`);
+        
+        try {
+          if (file.size > 100 * 1024 * 1024) {
+            await uploadFileInChunks('apps', fileName, file);
+          } else {
+            const { error: uploadError } = await supabase.storage
+              .from('apps')
+              .upload(fileName, file, { upsert: false });
+            
+            if (uploadError) {
+              throw uploadError;
+            }
+          }
+        } catch (err) {
+          console.error(`❌ Upload failed for ${device.id}:`, err);
+          continue;
+        }
+        
+        const { error: queueError } = await supabase
+          .from('install_queue')
+          .insert({ device_id: device.id, app_path: fileName });
+        
+        if (queueError) {
+          console.error(`❌ Queue insert failed for ${device.id}:`, queueError);
+          continue;
+        }
+        
+        console.log(`✅ Queued for ${device.id}`);
+        successCount++;
+      }
+
+      alert(`APK queued for ${successCount}/${freeDevices.length} devices!`);
+    }
+
+    // Realtime updates
+    supabase
+      .channel('public:devices')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'devices' },
+        (payload) => {
+          console.log('📡 Device change:', payload);
+          loadDevices();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Devices channel status:', status);
+      });
+
+    supabase
+      .channel('public:install_queue')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'install_queue' },
+        (payload) => {
+          console.log('📡 Install queue change:', payload);
+          loadDevices();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Install queue channel status:', status);
+      });
+
+    console.log('🚀 Supabase Device Farm initialized');
+    console.log('🔗 Supabase URL:', SUPABASE_URL);
+    loadDevices();
+    loadExistingBuilds();
+  </script>
+</body>
+</html>
