@@ -24,44 +24,75 @@ async function updateAndroidDevices() {
     const { stdout } = await execAsync('adb devices -l');
     const lines = stdout.split('\n').slice(1);
 
+    const foundDeviceIds = new Set();
     let deviceCount = 0;
+
     for (const line of lines) {
       if (!line.trim()) continue;
       const match = line.match(/([a-zA-Z0-9.:_-]+)\s+device\b/);
       if (!match) continue;
 
       const deviceId = match[1];
+      foundDeviceIds.add(deviceId);
       deviceCount++;
 
-      const modelRes = await execAsync(
-        `adb -s ${deviceId} shell getprop ro.product.model`
-      );
-      const model = modelRes.stdout.trim() || 'Android Device';
+      try {
+        const modelRes = await execAsync(
+          `adb -s ${deviceId} shell getprop ro.product.model`
+        );
+        const model = modelRes.stdout.trim() || 'Android Device';
 
-      const osRes = await execAsync(
-        `adb -s ${deviceId} shell getprop ro.build.version.release`
-      );
-      const osVersion = osRes.stdout.trim() || 'unknown';
+        const osRes = await execAsync(
+          `adb -s ${deviceId} shell getprop ro.build.version.release`
+        );
+        const osVersion = osRes.stdout.trim() || 'unknown';
 
-      console.log(`📱 Found device: ${deviceId} - ${model} (Android ${osVersion})`);
+        console.log(`📱 Found device: ${deviceId} - ${model} (Android ${osVersion})`);
 
-      const { data, error } = await supabase.from('devices').upsert(
-        {
-          id: deviceId,
-          type: 'android',
-          model,
-          os_version: osVersion,
-          status: 'free',
-          host_name: HOST_NAME,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'id' }
-      );
+        // Update database with 'free' status if device is found
+        // Note: We use upsert but don't force 'free' if it's already 'busy'
+        // Actually, for now let's just ensure it's at least not 'offline'
+        const { error } = await supabase.from('devices').upsert(
+          {
+            id: deviceId,
+            type: 'android',
+            model,
+            os_version: osVersion,
+            status: 'free', // Default to free on discovery
+            host_name: HOST_NAME,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'id' }
+        );
 
-      if (error) {
-        console.error(`❌ Failed to update device ${deviceId}:`, error);
-      } else {
-        console.log(`✅ Updated device ${deviceId} in database`);
+        if (error) {
+          console.error(`❌ Failed to update device ${deviceId}:`, error);
+        } else {
+          console.log(`✅ Updated device ${deviceId} in database`);
+        }
+      } catch (deviceErr) {
+        console.error(`⚠️ Could not get info for device ${deviceId}:`, deviceErr.message);
+      }
+    }
+
+    // Now mark devices NOT found as offline
+    // Filter by host_name to only affect devices managed by this host
+    const { data: dbDevices, error: fetchError } = await supabase
+      .from('devices')
+      .select('id, status')
+      .eq('host_name', HOST_NAME);
+
+    if (fetchError) {
+      console.error('❌ Failed to fetch devices from database:', fetchError);
+    } else if (dbDevices) {
+      for (const dbDevice of dbDevices) {
+        if (!foundDeviceIds.has(dbDevice.id) && dbDevice.status !== 'offline') {
+          console.log(`🔌 Device ${dbDevice.id} missing, marking as offline...`);
+          await supabase
+            .from('devices')
+            .update({ status: 'offline', updated_at: new Date().toISOString() })
+            .eq('id', dbDevice.id);
+        }
       }
     }
     
@@ -173,11 +204,11 @@ async function main() {
   console.log('🚀 Starting device host...');
   console.log('📍 Host name:', HOST_NAME);
   console.log('🔗 Supabase URL:', SUPABASE_URL);
-  console.log('⏰ Device scan interval: 30 seconds');
+  console.log('⏰ Device scan interval: 5 seconds');
   console.log('');
   
   await updateAndroidDevices();
-  setInterval(updateAndroidDevices, 30_000);
+  setInterval(updateAndroidDevices, 5_000);
   await watchInstallQueue();
   
   // Start the streaming server

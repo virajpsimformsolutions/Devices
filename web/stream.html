@@ -276,6 +276,60 @@
       color: rgba(255, 255, 255, 0.4);
       text-align: center;
     }
+
+    /* Performance Panel Styles */
+    .performance-panel {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(26, 26, 46, 0.85);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 100;
+      min-width: 140px;
+    }
+
+    .metric {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .metric .icon {
+      font-size: 1.2rem;
+      width: 24px;
+      text-align: center;
+    }
+
+    .metric-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .metric .label {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.05rem;
+    }
+
+    .metric .value {
+      font-size: 1rem;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .metric .unit {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.5);
+      margin-left: 2px;
+    }
   </style>
 </head>
 <body>
@@ -307,6 +361,11 @@
     </div>
 
     <div class="quick-actions">
+      <button class="quick-action-btn" onclick="toggleRecording()" id="record-btn" title="Screen Record">🔴</button>
+      <button class="quick-action-btn" onclick="toggleLogs()" id="logs-btn" title="Device Logs">📱</button>
+      <button class="quick-action-btn" onclick="openLocationPicker()" title="Set Location">📍</button>
+      <button class="quick-action-btn" onclick="document.getElementById('file-upload-input').click()" title="Upload File">📁</button>
+      <button class="quick-action-btn" onclick="syncClipboard()" title="Sync Clipboard">📋</button>
       <button class="quick-action-btn" onclick="wakeAndUnlock()" title="Wake & Unlock">🔓</button>
       <button class="quick-action-btn" onclick="sendKeyEvent(3)" title="Home">🏠</button>
       <button class="quick-action-btn" onclick="sendKeyEvent(4)" title="Back">◀</button>
@@ -317,6 +376,52 @@
       <button class="quick-action-btn" onclick="openTextInput()" title="Type Text">⌨️</button>
       <button class="quick-action-btn" onclick="rotateDevice()" title="Rotate">🔄</button>
       <button class="quick-action-btn" onclick="takeScreenshot()" title="Screenshot">📸</button>
+    </div>
+    
+    <!-- Hidden file input -->
+    <input type="file" id="file-upload-input" style="display:none" onchange="handleFileUpload(event)" />
+    
+    <!-- Enhanced Performance Panel -->
+    <div class="performance-panel" id="performance-panel" style="display:none;">
+      <div class="metric">
+        <span class="icon">⚙️</span>
+        <div class="metric-info">
+          <span class="label">CPU</span>
+          <span class="value" id="cpu-usage">--</span><span class="unit">%</span>
+        </div>
+      </div>
+      
+      <div class="metric">
+        <span class="icon">💾</span>
+        <div class="metric-info">
+          <span class="label">RAM</span>
+          <span class="value" id="ram-usage">--</span><span class="unit">MB</span>
+        </div>
+      </div>
+      
+      <div class="metric">
+        <span class="icon">🔋</span>
+        <div class="metric-info">
+          <span class="label">Battery</span>
+          <span class="value" id="battery-level">--</span><span class="unit">%</span>
+        </div>
+      </div>
+      
+      <div class="metric">
+        <span class="icon">🌡️</span>
+        <div class="metric-info">
+          <span class="label">Temp</span>
+          <span class="value" id="battery-temp">--</span><span class="unit">°C</span>
+        </div>
+      </div>
+      
+      <div class="metric">
+        <span class="icon">📶</span>
+        <div class="metric-info">
+          <span class="label">Network</span>
+          <span class="value" id="network-down">--</span><span class="unit">MB</span>
+        </div>
+      </div>
     </div>
 
     <!-- Text Input Modal -->
@@ -330,7 +435,45 @@
         </div>
       </div>
     </div>
+    
+    <!-- Location Picker Modal -->
+    <div id="location-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+      <div style="background: #1a1a2e; padding: 24px; border-radius: 12px; max-width: 500px; width: 90%;">
+        <h3 style="margin-top: 0;">📍 Set Device Location</h3>
+        
+        <p style="color: #aaa; font-size: 13px;">Choose a city or enter custom coordinates</p>
+        
+        <!-- City Presets -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0;">
+          <button class="btn btn-secondary" onclick="setLocation(37.7749, -122.4194, 'San Francisco')">🌉 San Francisco</button>
+          <button class="btn btn-secondary" onclick="setLocation(40.7128, -74.0060, 'New York')">🗽 New York</button>
+          <button class="btn btn-secondary" onclick="setLocation(51.5074, -0.1278, 'London')">🇬🇧 London</button>
+          <button class="btn btn-secondary" onclick="setLocation(35.6762, 139.6503, 'Tokyo')">🗼 Tokyo</button>
+          <button class="btn btn-secondary" onclick="setLocation(48.8566, 2.3522, 'Paris')">🗼 Paris</button>
+          <button class="btn btn-secondary" onclick="setLocation(-33.8688, 151.2093, 'Sydney')">🏖️ Sydney</button>
+        </div>
+        
+        <div style="border-top: 1px solid #333; margin: 16px 0; padding-top: 16px;">
+          <p style="color: #aaa; font-size: 13px; margin-bottom: 8px;">Or enter custom coordinates:</p>
+          <div style="display: flex; gap: 8px;">
+            <input id="custom-lat" type="number" step="0.0001" placeholder="Latitude" style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #555; background: #333; color: white;">
+            <input id="custom-lng" type="number" step="0.0001" placeholder="Longitude" style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #555; background: #333; color: white;">
+          </div>
+          <button class="btn btn-primary" onclick="applyCustomLocation()" style="width: 100%; margin-top: 12px;">Apply Custom Location</button>
+        </div>
+        
+        <button class="btn btn-secondary" onclick="closeLocationPicker()" style="width: 100%; margin-top: 8px;">Cancel</button>
+      </div>
+    </div>
 
+    <!-- Log Panel -->
+    <div class="log-panel" id="log-panel">
+      <div class="log-header">
+        <span>📱 Device Logs</span>
+        <button onclick="clearLogs()">Clear</button>
+      </div>
+      <div class="log-content" id="log-content"></div>
+    </div>
 
     <div class="connection-info" id="connection-info"></div>
   </div>
@@ -508,6 +651,9 @@
           document.getElementById('placeholder').style.display = 'none';
           canvas.style.display = 'block';
           isConnected = true;
+
+          // Start Phase 3 polling
+          startEnhancedDeviceInfoPolling();
           break;
           
         case 'frame':
@@ -515,6 +661,28 @@
           if (message.data) {
             renderFrame(message.format || 'png', message.data);
           }
+          break;
+          
+        case 'device_info':
+          // Performance metrics received
+          updatePerformanceMetrics(message.data);
+          break;
+
+        case 'location_set':
+          // Geolocation confirmation
+          console.log(`✅ Location updated to: ${message.latitude}, ${message.longitude}`);
+          showTemporaryMessage('📍 Location updated!');
+          break;
+
+        case 'log':
+          // Device log message
+          handleLogMessage(message.data);
+          break;
+          
+        case 'file_uploaded':
+          // File upload confirmation
+          console.log(`✅ File uploaded: ${message.filename}`);
+          showTemporaryMessage('📁 File uploaded!');
           break;
           
         case 'error':
@@ -1048,6 +1216,259 @@
         ws.close(1000, 'Page closed');
       }
     });
+    
+    /**
+     * ===== PHASE 1: BROWSERSTACK FEATURES =====
+     */
+    
+    // Screen recording state
+    let isRecording = false;
+    
+    function toggleRecording() {
+      const btn = document.getElementById('record-btn');
+      
+      if (!isRecording) {
+        // Start recording
+        ws.send(JSON.stringify({ type: 'start_recording' }));
+        isRecording = true;
+        btn.textContent = '⏹️';
+        btn.title = 'Stop Recording';
+        console.log('🎬 Recording started');
+      } else {
+        // Stop recording
+        ws.send(JSON.stringify({ type: 'stop_recording' }));
+        isRecording = false;
+        btn.textContent = '🔴';
+        btn.title = 'Screen Record';
+        console.log('⏹️ Recording stopped');
+      }
+    }
+    
+    async function syncClipboard() {
+      try {
+        // Get browser clipboard
+        const browserClipboard = await navigator.clipboard.readText();
+        
+        if (browserClipboard) {
+          // Send to device
+          ws.send(JSON.stringify({
+            type: 'set_clipboard',
+            text: browserClipboard
+          }));
+          
+          console.log('📋 Clipboard synced to device');
+        }
+      } catch (err) {
+        console.error('❌ Clipboard sync failed:', err);
+      }
+    }
+    
+    // Device info polling
+    function startDeviceInfoPolling() {
+      // Show device stats panel
+      const statsPanel = document.getElementById('device-stats');
+      if (statsPanel) statsPanel.style.display = 'flex';
+      
+      // Poll every 10 seconds
+      setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'get_device_info' }));
+        }
+      }, 10000);
+      
+      // Initial request
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_device_info' }));
+      }
+    }
+    
+    /**
+     * ===== PHASE 2: DEVELOPER TOOLS =====
+     */
+    
+    // Log panel state
+    let isLogsActive = false;
+    
+    function toggleLogs() {
+      const panel = document.getElementById('log-panel');
+      const btn = document.getElementById('logs-btn');
+      
+      if (!isLogsActive) {
+        // Show logs and start streaming
+        panel.classList.add('active');
+        isLogsActive = true;
+        btn.style.background = '#4CAF50';
+        
+        ws.send(JSON.stringify({ type: 'start_logcat' }));
+        console.log('📱 Started logcat stream');
+      } else {
+        // Hide logs and stop streaming
+        panel.classList.remove('active');
+        isLogsActive = false;
+        btn.style.background = '';
+        
+        ws.send(JSON.stringify({ type: 'stop_logcat' }));
+        console.log('📱 Stopped logcat stream');
+      }
+    }
+    
+    function clearLogs() {
+      const logContent = document.getElementById('log-content');
+      if (logContent) {
+        logContent.innerHTML = '';
+      }
+    }
+    
+    function handleLogMessage(logData) {
+      const logContent = document.getElementById('log-content');
+      if (!logContent) return;
+      
+      const logLine = document.createElement('div');
+      logLine.className = 'log-line';
+      
+      // Color code by log level
+      if (logData.includes(' E/') || logData.includes('ERROR')) {
+        logLine.classList.add('log-line-error');
+      } else if (logData.includes(' W/') || logData.includes('WARN')) {
+        logLine.classList.add('log-line-warning');
+      } else if (logData.includes(' I/') || logData.includes('INFO')) {
+        logLine.classList.add('log-line-info');
+      }
+      
+      logLine.textContent = logData;
+      logContent.appendChild(logLine);
+      
+      // Auto-scroll to bottom
+      logContent.scrollTop = logContent.scrollHeight;
+      
+      // Limit logs to 1000 lines
+      while (logContent.children.length > 1000) {
+        logContent.removeChild(logContent.firstChild);
+      }
+    }
+    
+    async function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      console.log(`📁 Uploading ${file.name}...`);
+      
+      try {
+        // Read file as base64
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64Data = reader.result.split(',')[1];
+          
+          ws.send(JSON.stringify({
+            type: 'upload_file',
+            filename: file.name,
+            data: base64Data
+          }));
+        };
+        
+        reader.readAsDataURL(file);
+      } catch (err) {
+        console.error('❌ File upload failed:', err);
+      }
+      
+      // Reset file input
+      event.target.value = '';
+    }
+    
+    /**
+     * ===== PHASE 3: ADVANCED FEATURES =====
+     */
+    
+    // Location Picker
+    function openLocationPicker() {
+      const modal = document.getElementById('location-modal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    }
+    
+    function closeLocationPicker() {
+      const modal = document.getElementById('location-modal');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    }
+    
+    function setLocation(lat, lng, cityName) {
+      ws.send(JSON.stringify({
+        type: 'set_location',
+        latitude: lat,
+        longitude: lng,
+        altitude: 0
+      }));
+      
+      closeLocationPicker();
+      console.log(`📍 Location set to ${cityName}: ${lat}, ${lng}`);
+    }
+    
+    function applyCustomLocation() {
+      const lat = parseFloat(document.getElementById('custom-lat').value);
+      const lng = parseFloat(document.getElementById('custom-lng').value);
+      
+      if (isNaN(lat) || isNaN(lng)) {
+        alert('Please enter valid coordinates');
+        return;
+      }
+      
+      setLocation(lat, lng, 'Custom Location');
+    }
+    
+    // Enhanced Device Info Polling
+    function startEnhancedDeviceInfoPolling() {
+      // Show performance panel
+      const panel = document.getElementById('performance-panel');
+      if (panel) panel.style.display = 'flex';
+      
+      // Poll every 5 seconds
+      setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'get_device_info' }));
+        }
+      }, 5000);
+      
+      // Initial request
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_device_info' }));
+      }
+    }
+    
+    function updatePerformanceMetrics(data) {
+      // Update CPU
+      if (data.cpu && data.cpu.usage !== null) {
+        document.getElementById('cpu-usage').textContent = data.cpu.usage;
+      }
+      
+      // Update Memory
+      if (data.memory) {
+        if (data.memory.used !== null && data.memory.total !== null) {
+          document.getElementById('ram-usage').textContent = 
+            `${data.memory.used}/${data.memory.total}`;
+        }
+      }
+      
+      // Update Battery
+      if (data.battery) {
+        if (data.battery.level !== null) {
+          document.getElementById('battery-level').textContent = data.battery.level;
+        }
+        if (data.battery.temperature !== null) {
+          document.getElementById('battery-temp').textContent = data.battery.temperature;
+        }
+      }
+      
+      // Update Network
+      if (data.network) {
+        const networkDisplay = `↓${data.network.downloadMB}`;
+        document.getElementById('network-down').textContent = networkDisplay;
+      }
+    }
+  
+  
   </script>
 </body>
 </html>
