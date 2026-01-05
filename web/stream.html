@@ -568,6 +568,7 @@
     let touchStartY = 0;
     let touchStartTime = 0;
     let isDragging = false;
+    let isIos = false;
     let longPressTimer = null;
     let swipePath = null; // SVG element for showing drag path
     let pathPoints = []; // Track all points in the drag path
@@ -619,7 +620,7 @@
       
       ws.onerror = (err) => {
         console.error('❌ WebSocket error:', err);
-        updateStatus('error', 'Connection Error');
+        updateStatus('error', message.message || 'Stream connection failed');
       };
       
       ws.onclose = (event) => {
@@ -639,7 +640,13 @@
           // Device info received
           deviceWidth = message.width;
           deviceHeight = message.height;
+          isIos = message.isIos || false;
+          
           document.getElementById('device-resolution').textContent = `${deviceWidth}×${deviceHeight}`;
+          if (isIos) {
+            document.querySelector('.header h1').innerHTML = `<span>📱</span> iOS Device: <span style="opacity: 0.7">${deviceId}</span>`;
+            document.getElementById('logcat-header').textContent = 'System Log (syslog)';
+          }
           
           // Set canvas size (scale to fit)
           const maxHeight = window.innerHeight - 200;
@@ -654,11 +661,20 @@
 
           // Start Phase 3 polling
           startEnhancedDeviceInfoPolling();
+          
+          if (isIos) {
+            showIosFallback();
+          }
           break;
           
         case 'frame':
           // Render video frame
           if (message.data) {
+            // Hide iOS fallback if we get a real frame
+            if (isIos) {
+              const fallback = document.getElementById('ios-fallback');
+              if (fallback) fallback.style.display = 'none';
+            }
             renderFrame(message.format || 'png', message.data);
           }
           break;

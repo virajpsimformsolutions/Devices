@@ -98,54 +98,98 @@ async function startStream(deviceId, ws) {
   
   try {
     // Check if device is available
-    const { stdout: deviceList } = await execAsync('adb devices');
-    if (!deviceList.includes(deviceId)) {
-      throw new Error('Device not connected');
+    let isIos = false;
+    const { stdout: adbList } = await execAsync('adb devices');
+    if (!adbList.includes(deviceId)) {
+      const { stdout: iosList } = await execAsync('idevice_id -l');
+      if (iosList.includes(deviceId)) {
+        isIos = true;
+      } else {
+        throw new Error('Device not connected');
+      }
     }
     
-    // Get device screen size
-    const { stdout: sizeOutput } = await execAsync(
-      `adb -s ${deviceId} shell wm size`
-    );
-    const sizeMatch = sizeOutput.match(/(\d+)x(\d+)/);
-    const width = sizeMatch ? parseInt(sizeMatch[1]) : 1080;
-    const height = sizeMatch ? parseInt(sizeMatch[2]) : 1920;
+    let width = 1080;
+    let height = 1920;
+
+    if (isIos) {
+      // Get iOS screen size
+      const { stdout: iosInfo } = await execAsync(`ideviceinfo -u ${deviceId}`);
+      // devicectl info gives more accurate pixel bounds
+      try {
+        const { stdout: displayInfo } = await execAsync(`xcrun devicectl device info displays --device ${deviceId}`);
+        const boundsMatch = displayInfo.match(/nativeSize: \((\d+\.?\d*), (\d+\.?\d*)\)/);
+        if (boundsMatch) {
+          width = Math.round(parseFloat(boundsMatch[1]));
+          height = Math.round(parseFloat(boundsMatch[2]));
+        }
+      } catch (e) {
+        // Fallback or just use default
+      }
+    } else {
+      // Get Android device screen size
+      const { stdout: sizeOutput } = await execAsync(
+        `adb -s ${deviceId} shell wm size`
+      );
+      const sizeMatch = sizeOutput.match(/(\d+)x(\d+)/);
+      width = sizeMatch ? parseInt(sizeMatch[1]) : 1080;
+      height = sizeMatch ? parseInt(sizeMatch[2]) : 1920;
+    }
     
     // Send device info to client
     ws.send(JSON.stringify({
       type: 'info',
       deviceId,
       width,
-      height
+      height,
+      isIos
     }));
     
-    console.log(`📺 Starting screenshot stream for ${deviceId} (${width}x${height})`);
+    console.log(`📺 Starting ${isIos ? 'iOS' : 'Android'} stream for ${deviceId} (${width}x${height})`);
     
     const stream = {
       clients: new Set([ws]),
       width,
       height,
+      isIos,
       interval: null,
-      capturing: false
+      capturing: false,
+      logProcess: null
     };
     
     activeStreams.set(deviceId, stream);
     
-    // Start capturing screenshots
-    stream.interval = setInterval(async () => {
-      if (stream.capturing || stream.clients.size === 0) return;
+    // Start Phase 2: Logs
+    if (isIos) {
+      startIosLogs(deviceId, stream);
+    } else {
+      startLogcat(deviceId, stream);
+    }
+
+    // Start Phase 4: Capture loop
+    if (!isIos) {
+      stream.interval = setInterval(async () => {
+        if (stream.capturing || stream.clients.size === 0) return;
+        
+        stream.capturing = true;
+        try {
+          await captureAndSendFrame(deviceId, stream);
+        } catch (err) {
+          console.error(`❌ Frame capture error for ${deviceId}:`, err.message);
+        }
+        stream.capturing = false;
+      }, FRAME_INTERVAL);
       
-      stream.capturing = true;
+      // Capture first frame immediately
+      await captureAndSendFrame(deviceId, stream);
+    } else {
+      // iOS streaming will be implemented via WDA or go-ios mjpeg
+      console.log(`⏳ iOS Video Stream pending implementation for ${deviceId}`);
+      // For now, let's try a single screenshot if possible
       try {
-        await captureAndSendFrame(deviceId, stream);
-      } catch (err) {
-        console.error(`❌ Frame capture error for ${deviceId}:`, err.message);
-      }
-      stream.capturing = false;
-    }, FRAME_INTERVAL);
-    
-    // Capture first frame immediately
-    await captureAndSendFrame(deviceId, stream);
+        await captureAndSendIosFrame(deviceId, stream);
+      } catch (e) {}
+    }
     
   } catch (err) {
     console.error(`❌ Failed to start stream for ${deviceId}:`, err.message);
@@ -223,20 +267,122 @@ export function stopStream(deviceId) {
 }
 
 /**
- * Remove a client from a device stream
- * @param {string} deviceId - ADB device ID
- * @param {WebSocket} ws - WebSocket client to remove
+ * Stop streaming for a client on a device
+ * @param {string} deviceId - ADB/iOS device ID
+ * @param {WebSocket} ws - WebSocket client connection
  */
 function removeClient(deviceId, ws) {
   const stream = activeStreams.get(deviceId);
   if (!stream) return;
   
   stream.clients.delete(ws);
+  console.log(`📱 Client removed from ${deviceId}. Remaining: ${stream.clients.size}`);
   
-  // If no more clients, stop the stream
   if (stream.clients.size === 0) {
-    console.log(`📺 No more clients for ${deviceId}, stopping stream`);
-    stopStream(deviceId);
+    if (stream.interval) {
+      clearInterval(stream.interval);
+    }
+    
+    // Stop logs
+    if (stream.logProcess) {
+      stream.logProcess.kill();
+      console.log(`📋 Stopped logs for ${deviceId}`);
+    }
+    
+    activeStreams.delete(deviceId);
+    console.log(`📺 Closed stream for ${deviceId}`);
+  }
+}
+
+/**
+ * Start system logs for iOS
+ * @param {string} deviceId - iOS device UDID
+ * @param {Object} stream - Stream object
+ */
+function startIosLogs(deviceId, stream) {
+  console.log(`📋 Starting iOS logs for ${deviceId}...`);
+  
+  // Use go-ios syslog for real-time logs
+  const logProcess = spawn('ios', ['syslog', '--udid', deviceId]);
+  stream.logProcess = logProcess;
+
+  let buffer = '';
+  logProcess.stdout.on('data', (data) => {
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // Keep partial line in buffer
+
+    lines.forEach(line => {
+      if (!line.trim()) return;
+      try {
+        const logEntry = JSON.parse(line);
+        const message = {
+          type: 'log',
+          data: logEntry.msg || line
+        };
+        const messageJson = JSON.stringify(message);
+        stream.clients.forEach(client => {
+          if (client.readyState === 1) client.send(messageJson);
+        });
+      } catch (e) {
+        // Fallback for non-JSON logs
+        const message = { type: 'log', data: line };
+        const messageJson = JSON.stringify(message);
+        stream.clients.forEach(client => {
+          if (client.readyState === 1) client.send(messageJson);
+        });
+      }
+    });
+  });
+
+  logProcess.stderr.on('data', (data) => {
+    // console.log(`📋 iOS Log stderr: ${data.toString()}`);
+  });
+
+  logProcess.on('close', (code) => {
+    console.log(`📋 iOS logs for ${deviceId} exited with code ${code}`);
+  });
+}
+
+/**
+ * Capture a screenshot from iOS and send to clients
+ * @param {string} deviceId - iOS device UDID
+ * @param {Object} stream - Stream object
+ */
+async function captureAndSendIosFrame(deviceId, stream) {
+  if (stream.clients.size === 0) return;
+  
+  try {
+    // Attempting to get screenshot via go-ios
+    // This often fails on iOS 17+ without tunnel, but we'll try it as a fallback
+    const { stdout } = await execAsync(
+      `ios screenshot --udid ${deviceId} --output - | ffmpeg -i - -q:v 3 -f image2pipe -vcodec mjpeg - 2>/dev/null | base64`,
+      { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 }
+    );
+    
+    const base64Data = stdout.toString('utf8').trim();
+    
+    if (base64Data.length > 0) {
+      const frame = {
+        type: 'frame',
+        format: 'jpeg',
+        data: base64Data
+      };
+      const frameJson = JSON.stringify(frame);
+      
+      stream.clients.forEach((client) => {
+        if (client.readyState === 1) {
+          client.send(frameJson);
+        }
+      });
+    }
+  } catch (err) {
+    // If it fails, we don't spam. On iOS 17+, video usually needs WDA or devicectl
+    // We send a placeholder or notification to the client once
+    if (!stream.notifiedFail) {
+      console.error(`❌ iOS Screenshot failed: ${err.message}`);
+      stream.notifiedFail = true;
+    }
   }
 }
 
@@ -253,6 +399,14 @@ const touchSessions = new Map(); // deviceId -> { touchDown: false, lastX, lastY
  */
 async function handleInputEvent(deviceId, event, ws) {
   try {
+    const stream = activeStreams.get(deviceId);
+    const isIos = stream ? stream.isIos : false;
+
+    if (isIos) {
+      return await handleIosInputEvent(deviceId, event, ws);
+    }
+
+    // Android logic follows...
     // Get or create touch session for this device
     if (!touchSessions.has(deviceId)) {
       touchSessions.set(deviceId, {
@@ -456,6 +610,55 @@ async function flushTouchEvents(deviceId) {
 }
 
 /**
+ * Handle iOS-specific input events using tidevice
+ * @param {string} deviceId - iOS device UDID
+ * @param {Object} event - Input event object
+ * @param {WebSocket} ws - WebSocket connection
+ */
+async function handleIosInputEvent(deviceId, event, ws) {
+  const binaryPath = path.join(process.env.HOME, 'Library/Python/3.14/bin/tidevice');
+  const tidevice = fs.existsSync(binaryPath) ? binaryPath : 'tidevice';
+
+  try {
+    switch (event.type) {
+      case 'tap':
+        // tidevice tap x y
+        await execAsync(`${tidevice} -u ${deviceId} tap ${Math.round(event.x)} ${Math.round(event.y)}`);
+        break;
+
+      case 'swipe':
+        // tidevice swipe x1 y1 x2 y2
+        await execAsync(`${tidevice} -u ${deviceId} swipe ${Math.round(event.x1)} ${Math.round(event.y1)} ${Math.round(event.x2)} ${Math.round(event.y2)}`);
+        break;
+
+      case 'touch_down':
+        // iOS doesn't easily support continuous touch via CLI without WDA
+        // We'll treat touch_down as a tap for now to avoid lag
+        await execAsync(`${tidevice} -u ${deviceId} tap ${Math.round(event.x)} ${Math.round(event.y)}`);
+        break;
+
+      case 'touch_move':
+        // Ignore move for now to prevent flooding, as swipe handles it better
+        break;
+
+      case 'keyevent':
+        // Send home button for keycode 3 (Android home)
+        if (event.keycode === 3) {
+          await execAsync(`${tidevice} -u ${deviceId} key home`);
+        }
+        break;
+
+      case 'text':
+        // Type text
+        await execAsync(`${tidevice} -u ${deviceId} type "${event.text}"`);
+        break;
+    }
+  } catch (err) {
+    console.error(`❌ iOS Input event failed for ${deviceId}:`, err.message);
+  }
+}
+
+/**
  * Get list of active streams
  * @returns {Array} List of device IDs with active streams
  */
@@ -651,9 +854,9 @@ const activeLogcats = new Map(); // deviceId -> { process, ws }
  * @param {string} deviceId - ADB device ID
  * @param {WebSocket} ws - WebSocket client
  */
-function startLogcatStream(deviceId, ws) {
+function startLogcat(deviceId, ws) {
   // Stop existing logcat if any
-  stopLogcatStream(deviceId);
+  stopLogcat(deviceId);
   
   try {
     // Start logcat with timestamps and filtering
@@ -704,7 +907,7 @@ function startLogcatStream(deviceId, ws) {
  * Stop logcat streaming
  * @param {string} deviceId - ADB device ID
  */
-function stopLogcatStream(deviceId) {
+function stopLogcat(deviceId) {
   const logcat = activeLogcats.get(deviceId);
   if (logcat) {
     logcat.process.kill('SIGTERM');

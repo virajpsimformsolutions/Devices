@@ -47,18 +47,15 @@ async function updateAndroidDevices() {
         );
         const osVersion = osRes.stdout.trim() || 'unknown';
 
-        console.log(`📱 Found device: ${deviceId} - ${model} (Android ${osVersion})`);
+        console.log(`📱 Found Android device: ${deviceId} - ${model} (Android ${osVersion})`);
 
-        // Update database with 'free' status if device is found
-        // Note: We use upsert but don't force 'free' if it's already 'busy'
-        // Actually, for now let's just ensure it's at least not 'offline'
         const { error } = await supabase.from('devices').upsert(
           {
             id: deviceId,
             type: 'android',
             model,
             os_version: osVersion,
-            status: 'free', // Default to free on discovery
+            status: 'free',
             host_name: HOST_NAME,
             updated_at: new Date().toISOString()
           },
@@ -66,28 +63,28 @@ async function updateAndroidDevices() {
         );
 
         if (error) {
-          console.error(`❌ Failed to update device ${deviceId}:`, error);
+          console.error(`❌ Failed to update Android device ${deviceId}:`, error);
         } else {
-          console.log(`✅ Updated device ${deviceId} in database`);
+          console.log(`✅ Updated Android device ${deviceId} in database`);
         }
       } catch (deviceErr) {
-        console.error(`⚠️ Could not get info for device ${deviceId}:`, deviceErr.message);
+        console.error(`⚠️ Could not get info for Android device ${deviceId}:`, deviceErr.message);
       }
     }
 
-    // Now mark devices NOT found as offline
-    // Filter by host_name to only affect devices managed by this host
+    // Mark missing Android devices as offline
     const { data: dbDevices, error: fetchError } = await supabase
       .from('devices')
       .select('id, status')
-      .eq('host_name', HOST_NAME);
+      .eq('host_name', HOST_NAME)
+      .eq('type', 'android');
 
     if (fetchError) {
-      console.error('❌ Failed to fetch devices from database:', fetchError);
+      console.error('❌ Failed to fetch Android devices from database:', fetchError);
     } else if (dbDevices) {
       for (const dbDevice of dbDevices) {
         if (!foundDeviceIds.has(dbDevice.id) && dbDevice.status !== 'offline') {
-          console.log(`🔌 Device ${dbDevice.id} missing, marking as offline...`);
+          console.log(`🔌 Android Device ${dbDevice.id} missing, marking as offline...`);
           await supabase
             .from('devices')
             .update({ status: 'offline', updated_at: new Date().toISOString() })
@@ -96,9 +93,86 @@ async function updateAndroidDevices() {
       }
     }
     
-    console.log(`✅ Total devices found: ${deviceCount}`);
+    console.log(`✅ Total Android devices found: ${deviceCount}`);
   } catch (err) {
-    console.error('❌ Error updating android devices:', err.message);
+    console.error('❌ Error updating Android devices:', err.message);
+  }
+}
+
+async function updateIosDevices() {
+  try {
+    console.log('🔍 Checking for iOS devices...');
+    const { stdout } = await execAsync('idevice_id -l');
+    const deviceIds = stdout.trim().split('\n').filter(id => id.trim());
+
+    const foundDeviceIds = new Set();
+    let deviceCount = 0;
+
+    for (const deviceId of deviceIds) {
+      foundDeviceIds.add(deviceId);
+      deviceCount++;
+
+      try {
+        const infoRes = await execAsync(`ideviceinfo -u ${deviceId}`);
+        const info = infoRes.stdout;
+        
+        const deviceNameMatch = info.match(/DeviceName: (.*)/);
+        const modelMatch = info.match(/ProductType: (.*)/);
+        const osVersionMatch = info.match(/ProductVersion: (.*)/);
+
+        const model = modelMatch ? modelMatch[1].trim() : 'iPhone';
+        const osVersion = osVersionMatch ? osVersionMatch[1].trim() : 'unknown';
+        const deviceName = deviceNameMatch ? deviceNameMatch[1].trim() : 'iOS Device';
+
+        console.log(`📱 Found iOS device: ${deviceId} - ${deviceName} (${model}, iOS ${osVersion})`);
+
+        const { error } = await supabase.from('devices').upsert(
+          {
+            id: deviceId,
+            type: 'ios',
+            model: `${deviceName} (${model})`,
+            os_version: osVersion,
+            status: 'free',
+            host_name: HOST_NAME,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'id' }
+        );
+
+        if (error) {
+          console.error(`❌ Failed to update iOS device ${deviceId}:`, error);
+        } else {
+          console.log(`✅ Updated iOS device ${deviceId} in database`);
+        }
+      } catch (deviceErr) {
+        console.error(`⚠️ Could not get info for iOS device ${deviceId}:`, deviceErr.message);
+      }
+    }
+
+    // Mark missing iOS devices as offline
+    const { data: dbDevices, error: fetchError } = await supabase
+      .from('devices')
+      .select('id, status')
+      .eq('host_name', HOST_NAME)
+      .eq('type', 'ios');
+
+    if (fetchError) {
+      console.error('❌ Failed to fetch iOS devices from database:', fetchError);
+    } else if (dbDevices) {
+      for (const dbDevice of dbDevices) {
+        if (!foundDeviceIds.has(dbDevice.id) && dbDevice.status !== 'offline') {
+          console.log(`🔌 iOS Device ${dbDevice.id} missing, marking as offline...`);
+          await supabase
+            .from('devices')
+            .update({ status: 'offline', updated_at: new Date().toISOString() })
+            .eq('id', dbDevice.id);
+        }
+      }
+    }
+
+    console.log(`✅ Total iOS devices found: ${deviceCount}`);
+  } catch (err) {
+    console.error('❌ Error updating iOS devices:', err.message);
   }
 }
 
@@ -207,8 +281,13 @@ async function main() {
   console.log('⏰ Device scan interval: 5 seconds');
   console.log('');
   
-  await updateAndroidDevices();
-  setInterval(updateAndroidDevices, 5_000);
+  async function updateAllDevices() {
+    await updateAndroidDevices();
+    await updateIosDevices();
+  }
+
+  await updateAllDevices();
+  setInterval(updateAllDevices, 5_000);
   await watchInstallQueue();
   
   // Start the streaming server
